@@ -5,8 +5,8 @@
 Medley is a library that supports searching for "similar" records in a dataset.
 
 This concept of "similar" is best defined via analogy:  Two words can be similar
-if they differ in spelling by only a letter or two.  This is how many spell-
-checkers work:  Finding real words that differ from what you typed by only
+if they differ in spelling by only a letter or two.  This is how many spell-checkers
+work:  Finding real words that differ from what you typed by only
 a few letters.  Extending that idea, Medley finds similar dataset records
 by examining field values and finding records where only a few field values
 are different.
@@ -34,6 +34,21 @@ unicode/unistr.h cannot be found, then you need to install library package.
 For either RHEL/CentOS or Debian operating systems, that package is libicu-dev.
 At minimum, you need to install it on the that compiles your ECL code
 (the node running eclccserver).
+
+## Versions
+
+The ECL module itself can be inspected for version information at compile time.
+The following attributes are all exported:
+
+	UNSIGNED1 VERSION_MAJOR
+	UNSIGNED1 VERSION_MINOR
+	UNSIGNED1 VERSION_POINT
+	STRING    VERSION_STRING
+
+|Version|Notes|
+|:----:|:-----|
+|0.5.0|Initial public release|
+|0.6.0|Support for multiple field directives in a single build|
 
 ## Example Code
 
@@ -205,9 +220,9 @@ neighborhoods to aid fuzzy matching, if any.  Note that if your
 data is already heavily normalized, you may not have any such
 fields.
 
-4) Create a fragmentation directive string (see the section titled
-FRAG_DIRECTIVE FORMATTING, below) using the information from steps
-1-3.
+4) Create a field directive string or a set of strings (see the section titled
+[Field Directive Formatting](#field_directive_formatting), below)
+using the information from steps 1-3.
 
 5) Decide on the record (or field group-level) maximum edit distance
 you want to use.  Remember that higher values produce more index
@@ -244,7 +259,7 @@ have a value for it.  You can have more than one record in this
 dataset if needed.
 
 2) Pass this created dataset to CreateLookupTable() along with the
-fragmentation directive string you used when creating the lookup
+field directive string you used when creating the lookup
 indexes, and the field group-level edit distance.  You will get
 back a lookup table of hash codes.
 
@@ -252,17 +267,22 @@ back a lookup table of hash codes.
 function.  What you get back will be a simple list of IDs
 (in IDLayout format) that are similar to the data from step #1.
 
-## FRAG_DIRECTIVE Formatting
+<a name="field_directive_formatting"></a>
+## Field Directive Formatting
 
-The fragmentation directive (the 'fieldSpec' parameter in Medley's
-CreateLookupTable() function macro) is a string defining how the input dataset
-should be parsed while creating lookup and search neighborhoods.  It is
-a semi-colon delimited string, with each element defining a "field group".
-A field group is a comma-delimited list of field names from the input
-dataset.  A field group may contain only one field name.  The unique ID
-field should not normally be included in any field group.   Individual
-fields may appear multiple times, but you should think carefully about the
-impact of doing so.
+The field directive (the 'fieldSpec' parameter in Medley's
+CreateLookupTable() function macro) is a single ```STRING``` or
+```SET OF STRING``` argument defining how the input dataset
+should be parsed while creating lookup and search neighborhoods.  Multiple
+directives can be supplied via the ```SET OF STRING``` form, with the
+effect of creating an OR condition between them.
+
+Each field directive string is a semi-colon delimited string, with each
+element defining a "field group".  A field group is a comma-delimited list
+of field names from the input dataset.  A field group may contain only one
+field name.  The unique ID field should not normally be included in any
+field group.   Individual fields may appear multiple times, but you should
+think carefully about the impact of doing so.
 
 Individual fields may be expanded with their own deletion neighborhoods.
 To indicate such an expansion, append the suffix of '%N' to the field's
@@ -270,7 +290,7 @@ name, where N is the maximum edit distance for the deletion neighborhood.
 Normally, N will be either 1 or 2 (larger maximum edit distances create
 considerably larger lookup tables and the result may cause too many
 false positive search results).  If a field appears more than once in a
-fragmentation directive and any of them have a %N suffix, then all
+field directive and any of them have a %N suffix, then all
 occurrences of that field will be be expanded with a maximum edit distance
 of MAX(N).
 
@@ -295,13 +315,13 @@ Practical example:  Let's assume you are working with this data structure:
 Remember, the entity ID field is NOT part of your directive.
 
 If you want to consider all of these fields independently, without grouping
-or creating any string-based deletion neighborhoods, the fragmentation
+or creating any string-based deletion neighborhoods, the field
 directive is a simple semi-colon delimited list of the six fields:
 
      fname;lname;street;city;state;postal;
 
 Note that a "field group" is defined as "one or more fields" so you have a
-fragmentation directive defining six field groups, even though each field
+field directive defining six field groups, even though each field
 group has only one field in it.
 
 Now let's say that in the interest of precision, you want to consider the
@@ -342,7 +362,7 @@ created for certain fields (not field groups).  For instance, if your data
 has not been thoroughly cleaned or if you will need to account for typos
 and such when searching, you may need that extra "fuzziness" to match
 records correctly.  String-based deletion neighborhoods are designated
-within the fragmentation directive by adding a suffix of '%N' to the field's
+within the field directive by adding a suffix of '%N' to the field's
 name, where N is the MaxED you want.  In our example, let's say that you
 want to be able to find first names with up to one character different
 (MaxED = 1) and the street part of the address with up to two characters
@@ -360,3 +380,14 @@ temporarily.  The field-level deletion neighborhood is the same, though:
      fname, lname, city/state/postal
 
 It's just that there will be many more of those records processed.
+
+As an example of using multiple field directives, let us take our example
+and assume that we want to match records using two different criteria:
+
+     fname;lname;postal;
+     lname;city,state,postal;
+
+Those two criteria are considered OR'd together when it comes to matching.
+All of the other formatting directives and limitations are valid for each
+directive.  To supply them, simply submit them in a ```SET OF STRING```
+data type rather than a simple ```STRING```.

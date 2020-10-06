@@ -43,6 +43,14 @@
 EXPORT Medley := MODULE
 
     //-------------------------------------------------------------------------
+    // Version information
+    //-------------------------------------------------------------------------
+    EXPORT UNSIGNED1 VERSION_MAJOR := 0;
+    EXPORT UNSIGNED1 VERSION_MINOR := 6;
+    EXPORT UNSIGNED1 VERSION_POINT := 0;
+    EXPORT STRING VERSION_STRING := VERSION_MAJOR + '.' + VERSION_MINOR + '.' + VERSION_POINT;
+
+    //-------------------------------------------------------------------------
     // Data types
     //-------------------------------------------------------------------------
     EXPORT ID_t := UNSIGNED6;
@@ -201,16 +209,18 @@ EXPORT Medley := MODULE
      *                              record; this is not a string; the field's
      *                              data type should match the ID_t definition
      *                              above; REQUIRED
-     * @param   fieldSpec           A string describing how the dataset should
-     *                              be processed; semi-colons are used to
-     *                              delimit field groups, commas are used to
-     *                              delimit fields; field names may optionally
-     *                              have a suffix of '%N' where N is the
-     *                              maximum edit distance to use when creating
-     *                              an inter-field deletion neighborhood;
-     *                              fields and field groups may have a
-     *                              '&' prefix to indicate that the field or
-     *                              field group should not be deleted when
+     * @param   fieldSpec           A description of how the dataset should be
+     *                              processed; can be a single STRING or a
+     *                              SET OF STRING to define several descriptions
+     *                              that are combined via OR; within each STRING,
+     *                              semi-colons are used to delimit field groups,
+     *                              commas are used to delimit fields; field
+     *                              names may optionally have a suffix of '%N'
+     *                              where N is the maximum edit distance to use
+     *                              when creating an inter-field deletion
+     *                              neighborhood; fields and field groups may
+     *                              have a '&' prefix to indicate that the field
+     *                              or field group should not be deleted when
      *                              constructing the intra-field deletion
      *                              neighhborhood; REQUIRED
      * @param   maxEditDistance     The maximum intra-field edit distance to
@@ -466,227 +476,283 @@ EXPORT Medley := MODULE
             return new StreamedHashValueDataset(_resultAllocator, setSource, numElements, max_edit_distance);
         ENDEMBED;
 
-        #UNIQUENAME(myMaxEditDistance);
-        #UNIQUENAME(myFieldSpec);
-        #UNIQUENAME(requiredFieldSpec);
-        #UNIQUENAME(requiredFieldSpecCount);
-        #UNIQUENAME(otherFieldSpec);
-        #UNIQUENAME(fieldList);
-        #UNIQUENAME(neighborhoodFields);
-        #UNIQUENAME(temp);
-        #UNIQUENAME(tempName);
-        #UNIQUENAME(tempVal);
-        #UNIQUENAME(tempSaved);
-        #UNIQUENAME(pos);
-        #UNIQUENAME(needDelim);
+        // Housekeeping involving fieldSpec, which could be a single spec (string)
+        // or multiple specs (set of strings)
+        #UNIQUENAME(fieldSpecType);
+        #SET(fieldSpecType, #GETDATATYPE(fieldSpec));
+        #UNIQUENAME(fieldSpecIsSet);
+        #UNIQUENAME(numFieldSpecs);
+        #IF(%'fieldSpecType'%[..7] = 'set of ')
+            #SET(fieldSpecIsSet, 1)
+            #SET(numFieldSpecs, COUNT(fieldSpec))
+        #ELSE
+            #SET(fieldSpecIsSet, 0)
+            #SET(numFieldSpecs, 1)
+        #END
+        #UNIQUENAME(fieldSpecIter)
+        #SET(fieldSpecIter, 1);
+
+        // Distribute the incoming data on the ID field, so we can localize operations later
+        #UNIQUENAME(distInFile);
+        LOCAL %distInFile% := DISTRIBUTE(inFile, HASH64((#$.Medley.ID_t)idField));
 
         // Make sure edit distance is non-negative
+        #UNIQUENAME(myMaxEditDistance);
         #SET(myMaxEditDistance, (UNSIGNED1)MAX((INTEGER1)maxEditDistance, 0));
 
-        // Remove spaces from fieldSpec, insert default edit distance where needed
-        #SET(myFieldSpec, REGEXREPLACE('%([^\\d])', TRIM(fieldSpec, ALL), '%1$1'));
+        // Placeholder for some built-up ECL, combining the results from
+        // multiple field specs
+        #UNIQUENAME(combineLookupTableStmt);
+        #SET(combineLookupTableStmt, '');
 
-        // Split field spec into required and other
-        #SET(requiredFieldSpec, '');
-        #SET(requiredFieldSpecCount, 0);
-        #SET(otherFieldSpec, '');
-        #SET(pos, 1);
         #LOOP
-            #SET(temp, REGEXFIND('([^;]+)', %'myFieldSpec'%[%pos%..], 1))
-            #IF(%'temp'% != '')
-                #IF(%'temp'%[1] = '&')
-                    #IF(%requiredFieldSpecCount% > 0)
-                        #APPEND(requiredFieldSpec, ';')
-                    #END
-                    #APPEND(requiredFieldSpec, %'temp'%[2..])
-                    #SET(requiredFieldSpecCount, %requiredFieldSpecCount% + 1);
+            #UNIQUENAME(interimLookupTable);
+            #UNIQUENAME(myFieldSpec)
+            #UNIQUENAME(requiredFieldSpec)
+            #UNIQUENAME(requiredFieldSpecCount)
+            #UNIQUENAME(otherFieldSpec)
+            #UNIQUENAME(fieldList)
+            #UNIQUENAME(neighborhoodFields)
+            #UNIQUENAME(temp)
+            #UNIQUENAME(tempName)
+            #UNIQUENAME(tempVal)
+            #UNIQUENAME(tempSaved)
+            #UNIQUENAME(pos)
+            #UNIQUENAME(needDelim)
+
+            #IF(%fieldSpecIter% <= %numFieldSpecs%)
+                // Remove spaces from fieldSpec, insert default edit distance where needed
+                #IF(%fieldSpecIsSet% = 0)
+                    #SET(myFieldSpec, REGEXREPLACE('%([^\\d])', TRIM((STRING)fieldSpec, ALL), '%1$1'))
                 #ELSE
-                    #IF(%'otherFieldSpec'% != '')
-                        #APPEND(otherFieldSpec, ';')
-                    #END
-                    #APPEND(otherFieldSpec, %'temp'%)
+                    #SET(myFieldSpec, REGEXREPLACE('%([^\\d])', TRIM((STRING)(fieldSpec[%fieldSpecIter%]), ALL), '%1$1'))
                 #END
-                #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
-            #ELSE
-                #BREAK
-            #END
-        #END
 
-        // Check for embedded required field group indicators (there should be none)
-        #IF(REGEXFIND('&', %'requiredFieldSpec'% + %'otherFieldSpec'%))
-            #ERROR('"' + fieldSpec + '" contains a required indicator (&) on an individual field within a field group')
-        #END
-
-        // Remove any required character patterns from the full field spec
-        #SET(myFieldSpec, REGEXREPLACE('&', %'myFieldSpec'%, ''));
-
-        // Find all fields where we need to create deletion neighborhoods on their values,
-        // and the maximum edit distance cited (in case the field was defined that way
-        // more than once)
-        #SET(neighborhoodFields, ',');
-        #SET(pos, 1);
-        #LOOP
-            #SET(temp, REGEXFIND('([^,;%]+%\\d+)', %'myFieldSpec'%[%pos%..], 1))
-            #SET(tempName, REGEXFIND('^([^%]+)%', %'temp'%, 1))
-            #SET(tempVal, REGEXFIND('%(\\d+)', %'temp'%, 1))
-            #IF(%'tempName'% != '' AND %'tempVal'% != '')
-                #SET(tempSaved, REGEXFIND('(,' + %'tempName'% + '%\\d+)', %'neighborhoodFields'%, 1))
-                #IF(%'tempSaved'% != '')
-                    #SET(neighborhoodFields, REGEXREPLACE(',' + %'tempSaved'%, %'neighborhoodFields'%, ',' + %'tempName'% + '%' + (STRING)(MAX((UNSIGNED2)REGEXFIND('%(\\d+)', %'tempSaved'%, 1), (UNSIGNED2)%'tempVal'%))))
-                #ELSE
-                    #APPEND(neighborhoodFields, %'temp'% + ',')
-                #END
-                #SET(pos, %pos% + LENGTH(REGEXFIND('^.+?[^,;%]+%\\d+', %'myFieldSpec'%[%pos%..], 0)) + 1)
-            #ELSE
-                #BREAK
-            #END
-        #END
-        #SET(neighborhoodFields, REGEXREPLACE('^,', %'neighborhoodFields'%, ''));
-        #SET(neighborhoodFields, REGEXREPLACE(',$', %'neighborhoodFields'%, ''));
-
-        // Record structure containing only the fields we want, coerced into UTF8 strings
-        #UNIQUENAME(FileRec);
-        LOCAL %FileRec% := RECORD
-            #$.Medley.ID_t  id;
-
-            #SET(fieldList, '')
-            #SET(pos, 1)
-            #LOOP
-                #SET(temp, REGEXFIND('^([^,;%]+)', %'myFieldSpec'%[%pos%..], 1))
-                #IF(%'temp'% != '')
-                    #SET(tempSaved, REGEXFIND('^' + %'temp'% + '(%\\d+)?[,;]*', %'myFieldSpec'%[%pos%..], 0))
-                    #IF(NOT REGEXFIND('\\b' + %'temp'% + '\\b', %'fieldList'%))
-                        #IF(%'fieldList'% != '')
-                            #APPEND(fieldList, ',')
-                        #END
-                        #APPEND(fieldList, %'temp'%)
-                        // Include the field in the record definition
-                        UTF8    %temp%;
-                    #END
-                    #SET(pos, %pos% + LENGTH(%'tempSaved'%))
-                #ELSE
-                    #BREAK
-                #END
-            #END
-        END;
-
-        // Create working dataset
-        #UNIQUENAME(workingFile);
-        LOCAL %workingFile% := PROJECT
-            (
-                inFile,
-                TRANSFORM
-                    (
-                        %FileRec%,
-                        SELF.id := (#$.Medley.ID_t)LEFT.idField
-                        #SET(pos, 1)
-                        #LOOP
-                            #SET(temp, REGEXFIND('^([^,]+)', %'fieldList'%[%pos%..], 1))
-                            #IF(%'temp'% != '')
-                                , SELF.%temp% := (UTF8)LEFT.%temp%
-                                #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
-                            #ELSE
-                                #BREAK
+                // Split field spec into required and other
+                #SET(requiredFieldSpec, '')
+                #SET(requiredFieldSpecCount, 0)
+                #SET(otherFieldSpec, '')
+                #SET(pos, 1)
+                #LOOP
+                    #SET(temp, REGEXFIND('([^;]+)', %'myFieldSpec'%[%pos%..], 1))
+                    #IF(%'temp'% != '')
+                        #IF(%'temp'%[1] = '&')
+                            #IF(%requiredFieldSpecCount% > 0)
+                                #APPEND(requiredFieldSpec, ';')
                             #END
+                            #APPEND(requiredFieldSpec, %'temp'%[2..])
+                            #SET(requiredFieldSpecCount, %requiredFieldSpecCount% + 1);
+                        #ELSE
+                            #IF(%'otherFieldSpec'% != '')
+                                #APPEND(otherFieldSpec, ';')
+                            #END
+                            #APPEND(otherFieldSpec, %'temp'%)
                         #END
-                    )
-            );
-
-        // Expand field values with deletion neighborhood entries, if any
-        #UNIQUENAME(expandedWorkingFile);
-        #IF(%'neighborhoodFields'% != '')
-            #UNIQUENAME(resultNameBase)
-            #UNIQUENAME(resultNameCounter)
-            #SET(resultNameCounter, 0)
-            #UNIQUENAME(resultName)
-            #SET(resultName, %'resultNameBase'% + %'resultNameCounter'%)
-            #UNIQUENAME(nextResultName)
-            LOCAL %resultName% := %workingFile%;
-
-            #SET(pos, 1)
-            #LOOP
-                #SET(temp, REGEXFIND('^([^,]+)', %'neighborhoodFields'%[%pos%..], 1))
-                #IF(%'temp'% != '')
-                    #SET(tempName, REGEXFIND('^([^%]+)', %'temp'%, 1))
-                    #SET(tempVal, REGEXFIND('%(\\d+)', %'temp'%, 1))
-                    #SET(resultNameCounter, %resultNameCounter% + 1)
-                    #SET(nextResultName, %'resultNameBase'% + %'resultNameCounter'%)
-
-                    LOCAL %nextResultName% := NORMALIZE
-                        (
-                            %resultName%,
-                            %CreateStringDeletionNeighborhood%(LEFT.%tempName%, %tempVal%),
-                            TRANSFORM
-                                (
-                                    RECORDOF(LEFT),
-                                    SELF.%tempName% := RIGHT.text,
-                                    SELF := LEFT
-                                )
-                        );
-
-                    #SET(resultName, %'nextResultName'%)
-                    #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
-                #ELSE
-                    #BREAK
+                        #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
+                    #ELSE
+                        #BREAK
+                    #END
                 #END
+
+                // Check for embedded required field group indicators (there should be none)
+                #IF(REGEXFIND('&', %'requiredFieldSpec'% + %'otherFieldSpec'%))
+                    #ERROR('"' + fieldSpec + '" contains a required indicator (&) on an individual field within a field group')
+                #END
+
+                // Remove any required character patterns from the full field spec
+                #SET(myFieldSpec, REGEXREPLACE('&', %'myFieldSpec'%, ''))
+
+                // Find all fields where we need to create deletion neighborhoods on their values,
+                // and the maximum edit distance cited (in case the field was defined that way
+                // more than once)
+                #SET(neighborhoodFields, ',')
+                #SET(pos, 1)
+                #LOOP
+                    #SET(temp, REGEXFIND('([^,;%]+%\\d+)', %'myFieldSpec'%[%pos%..], 1))
+                    #SET(tempName, REGEXFIND('^([^%]+)%', %'temp'%, 1))
+                    #SET(tempVal, REGEXFIND('%(\\d+)', %'temp'%, 1))
+                    #IF(%'tempName'% != '' AND %'tempVal'% != '')
+                        #SET(tempSaved, REGEXFIND('(,' + %'tempName'% + '%\\d+)', %'neighborhoodFields'%, 1))
+                        #IF(%'tempSaved'% != '')
+                            #SET(neighborhoodFields, REGEXREPLACE(',' + %'tempSaved'%, %'neighborhoodFields'%, ',' + %'tempName'% + '%' + (STRING)(MAX((UNSIGNED2)REGEXFIND('%(\\d+)', %'tempSaved'%, 1), (UNSIGNED2)%'tempVal'%))))
+                        #ELSE
+                            #APPEND(neighborhoodFields, %'temp'% + ',')
+                        #END
+                        #SET(pos, %pos% + LENGTH(REGEXFIND('^.+?[^,;%]+%\\d+', %'myFieldSpec'%[%pos%..], 0)) + 1)
+                    #ELSE
+                        #BREAK
+                    #END
+                #END
+                #SET(neighborhoodFields, REGEXREPLACE('^,', %'neighborhoodFields'%, ''))
+                #SET(neighborhoodFields, REGEXREPLACE(',$', %'neighborhoodFields'%, ''))
+
+                // Record structure containing only the fields we want, coerced into UTF8 strings
+                #UNIQUENAME(FileRec)
+                LOCAL %FileRec% := RECORD
+                    #$.Medley.ID_t  id;
+
+                    #SET(fieldList, '')
+                    #SET(pos, 1)
+                    #LOOP
+                        #SET(temp, REGEXFIND('^([^,;%]+)', %'myFieldSpec'%[%pos%..], 1))
+                        #IF(%'temp'% != '')
+                            #SET(tempSaved, REGEXFIND('^' + %'temp'% + '(%\\d+)?[,;]*', %'myFieldSpec'%[%pos%..], 0))
+                            #IF(NOT REGEXFIND('\\b' + %'temp'% + '\\b', %'fieldList'%))
+                                #IF(%'fieldList'% != '')
+                                    #APPEND(fieldList, ',')
+                                #END
+                                #APPEND(fieldList, %'temp'%)
+                                // Include the field in the record definition
+                                UTF8    %temp%;
+                            #END
+                            #SET(pos, %pos% + LENGTH(%'tempSaved'%))
+                        #ELSE
+                            #BREAK
+                        #END
+                    #END
+                END;
+
+                // Create working dataset
+                #UNIQUENAME(workingFile)
+                LOCAL %workingFile% := PROJECT
+                    (
+                        %distInFile%,
+                        TRANSFORM
+                            (
+                                %FileRec%,
+                                SELF.id := (#$.Medley.ID_t)LEFT.idField
+                                #SET(pos, 1)
+                                #LOOP
+                                    #SET(temp, REGEXFIND('^([^,]+)', %'fieldList'%[%pos%..], 1))
+                                    #IF(%'temp'% != '')
+                                        , SELF.%temp% := (UTF8)LEFT.%temp%
+                                        #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
+                                    #ELSE
+                                        #BREAK
+                                    #END
+                                #END
+                            )
+                    );
+
+                // Expand field values with deletion neighborhood entries, if any
+                #UNIQUENAME(expandedWorkingFile)
+                #IF(%'neighborhoodFields'% != '')
+                    #UNIQUENAME(resultNameBase)
+                    #UNIQUENAME(resultNameCounter)
+                    #SET(resultNameCounter, 0)
+                    #UNIQUENAME(resultName)
+                    #SET(resultName, %'resultNameBase'% + %'resultNameCounter'%)
+                    #UNIQUENAME(nextResultName)
+                    LOCAL %resultName% := %workingFile%;
+
+                    #SET(pos, 1)
+                    #LOOP
+                        #SET(temp, REGEXFIND('^([^,]+)', %'neighborhoodFields'%[%pos%..], 1))
+                        #IF(%'temp'% != '')
+                            #SET(tempName, REGEXFIND('^([^%]+)', %'temp'%, 1))
+                            #SET(tempVal, REGEXFIND('%(\\d+)', %'temp'%, 1))
+                            #SET(resultNameCounter, %resultNameCounter% + 1)
+                            #SET(nextResultName, %'resultNameBase'% + %'resultNameCounter'%)
+
+                            LOCAL %nextResultName% := NORMALIZE
+                                (
+                                    %resultName%,
+                                    %CreateStringDeletionNeighborhood%(LEFT.%tempName%, %tempVal%),
+                                    TRANSFORM
+                                        (
+                                            RECORDOF(LEFT),
+                                            SELF.%tempName% := RIGHT.text,
+                                            SELF := LEFT
+                                        )
+                                );
+
+                            #SET(resultName, %'nextResultName'%)
+                            #SET(pos, %pos% + LENGTH(%'temp'%) + 1)
+                        #ELSE
+                            #BREAK
+                        #END
+                    #END
+
+                    LOCAL %expandedWorkingFile% := %resultName%;
+                #ELSE
+                    LOCAL %expandedWorkingFile% := %workingFile%;
+                #END
+
+                // Create ECL code for hashing our fields and field groups
+                #UNIQUENAME(myFieldSpecLEFT)
+                #UNIQUENAME(requiredHashCmd)
+                #IF(%requiredFieldSpecCount% > 0)
+                    #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'requiredFieldSpec'%, ''), 'LEFT.$1'))
+                    #SET(requiredHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'))
+                    #SET(requiredHashCmd, 'HASH64(' + REGEXREPLACE(';', %'requiredHashCmd'%, ',') + ')')
+                #ELSE
+                    #SET(requiredHashCmd, -1)
+                #END
+                #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'otherFieldSpec'%, ''), 'LEFT.$1'))
+                #UNIQUENAME(otherHashCmd)
+                #SET(otherHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'))
+                #SET(otherHashCmd, '[' + REGEXREPLACE(';', %'otherHashCmd'%, ',') + ']')
+
+                // Collect all hashes needed for intra-field deletion neighborhood
+                #UNIQUENAME(hashSets)
+                LOCAL %hashSets% := PROJECT
+                    (
+                        %expandedWorkingFile%,
+                        TRANSFORM
+                            (
+                                {
+                                    #$.Medley.ID_t          id,
+                                    #$.Medley.Hash_t        required_hash_value,
+                                    SET OF #$.Medley.Hash_t hash_values
+                                },
+                                SELF.required_hash_value := %requiredHashCmd%,
+                                SELF.hash_values := %otherHashCmd%,
+                                SELF := LEFT
+                            )
+                    );
+
+                // Apply intra-field deletion neighborhood
+                #UNIQUENAME(collapsedHashes)
+                LOCAL %collapsedHashes% := NORMALIZE
+                    (
+                        %hashSets%,
+                        %CreateNumericSetDeletionNeighborhood%(LEFT.hash_values, %myMaxEditDistance%),
+                        TRANSFORM
+                            (
+                                {
+                                    #$.Medley.ID_t      id,
+                                    #$.Medley.Hash_t    hash_value
+                                },
+                                SELF.hash_value := HASH64(LEFT.required_hash_value, RIGHT.hash_value),
+                                SELF := LEFT
+                            )
+                    );
+
+                // Assign deduped data to an interim attribute
+                LOCAL %interimLookupTable% := DEDUP(SORT(%collapsedHashes%, id, hash_value, LOCAL), id, hash_value, LOCAL)
+
+                // Append the iterim attribute to our collection of attributes
+                #IF(%fieldSpecIter% > 1)
+                    #APPEND(combineLookupTableStmt, '+')
+                #END
+                #APPEND(combineLookupTableStmt, %'interimLookupTable'%)
+
+                #SET(fieldSpecIter, %fieldSpecIter% + 1)
+            #ELSE
+                #BREAK
             #END
-
-            LOCAL %expandedWorkingFile% := %resultName%;
-        #ELSE
-            LOCAL %expandedWorkingFile% := %workingFile%;
-        #END;
-
-        // Create ECL code for hashing our fields and field groups
-        #UNIQUENAME(myFieldSpecLEFT);
-        #UNIQUENAME(requiredHashCmd);
-        #IF(%requiredFieldSpecCount% > 0)
-            #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'requiredFieldSpec'%, ''), 'LEFT.$1'));
-            #SET(requiredHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'));
-            #SET(requiredHashCmd, 'HASH64(' + REGEXREPLACE(';', %'requiredHashCmd'%, ',') + ')');
-        #ELSE
-            #SET(requiredHashCmd, -1)
         #END
-        #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'otherFieldSpec'%, ''), 'LEFT.$1'));
-        #UNIQUENAME(otherHashCmd);
-        #SET(otherHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'));
-        #SET(otherHashCmd, '[' + REGEXREPLACE(';', %'otherHashCmd'%, ',') + ']');
 
-        // Collect all hashes needed for intra-field deletion neighborhood
-        #UNIQUENAME(hashSets);
-        LOCAL %hashSets% := PROJECT
-            (
-                %expandedWorkingFile%,
-                TRANSFORM
-                    (
-                        {
-                            #$.Medley.ID_t          id,
-                            #$.Medley.Hash_t        required_hash_value,
-                            SET OF #$.Medley.Hash_t hash_values
-                        },
-                        SELF.required_hash_value := %requiredHashCmd%,
-                        SELF.hash_values := %otherHashCmd%,
-                        SELF := LEFT
-                    )
-            );
+        #UNIQUENAME(finalResult);
+        LOCAL %finalResult% :=
+            #IF(%fieldSpecIsSet% = 0)
+                %combineLookupTableStmt%
+            #ELSE
+                // Dedup the collected interim attributes
+                DEDUP(SORT(%combineLookupTableStmt%, id, hash_value, LOCAL), id, hash_value, LOCAL)
+            #END;
 
-        // Apply intra-field deletion neighborhood
-        #UNIQUENAME(collapsedHashes);
-        LOCAL %collapsedHashes% := NORMALIZE
-            (
-                %hashSets%,
-                %CreateNumericSetDeletionNeighborhood%(LEFT.hash_values, %myMaxEditDistance%),
-                TRANSFORM
-                    (
-                        {
-                            #$.Medley.ID_t      id,
-                            #$.Medley.Hash_t    hash_value
-                        },
-                        SELF.hash_value := HASH64(LEFT.required_hash_value, RIGHT.hash_value),
-                        SELF := LEFT
-                    )
-            );
-
-        RETURN DEDUP(SORT(%collapsedHashes%, id, hash_value, LOCAL), id, hash_value, LOCAL);
+        RETURN %finalResult%;
     ENDMACRO;
 
     /**
@@ -967,17 +1033,11 @@ EXPORT Medley := MODULE
                            hash2IDIndexPath,
                            id2MatchIndexPath,
                            match2IDIndexPath) := FUNCTIONMACRO
-        // Distribute our source data for better performance
-        #UNIQUENAME(sourceData);
-        LOCAL %sourceData% := DISTRIBUTE(inFile, SKEW(0.05));
-
-        //-----------------
-
         // Create the lookup table from the original data
         #UNIQUENAME(lookupTable);
         LOCAL %lookupTable% := #$.Medley.CreateLookupTable
             (
-                %sourceData%,
+                inFile,
                 idField,
                 fieldSpec,
                 maxEditDistance
@@ -1006,7 +1066,7 @@ EXPORT Medley := MODULE
         // Return the actions
         RETURN PARALLEL
             (
-                OUTPUT(COUNT(%sourceData%), NAMED('source_data_rec_count'));
+                OUTPUT(COUNT(inFile), NAMED('source_data_rec_count'));
                 OUTPUT(fieldSpec, NAMED('frag_directive'));
                 OUTPUT(maxEditDistance, NAMED('frag_edit_distance'));
                 %createLookupIndexesAction%;

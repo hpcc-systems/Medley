@@ -72,7 +72,11 @@ EXPORT Job := MODULE
 
     END; // SourceData module
 
-    EXPORT FRAG_DIRECTIVE := 'fname%1,lname%1;bdate_yyyy;street1_only,city,state;age';
+    EXPORT FRAG_DIRECTIVE :=
+        [
+            'fname%1,lname%1;bdate_yyyy;street1_only,city,state;age',   // first directive
+            'lname,city,state,age'                                      // second directive
+        ];
     EXPORT FRAG_EDIT_DISTANCE := 1;
 
 END; // Job module
