@@ -47,7 +47,7 @@ EXPORT Medley := MODULE
     //-------------------------------------------------------------------------
     EXPORT UNSIGNED1 VERSION_MAJOR := 0;
     EXPORT UNSIGNED1 VERSION_MINOR := 6;
-    EXPORT UNSIGNED1 VERSION_POINT := 0;
+    EXPORT UNSIGNED1 VERSION_POINT := 1;
     EXPORT STRING VERSION_STRING := VERSION_MAJOR + '.' + VERSION_MINOR + '.' + VERSION_POINT;
 
     //-------------------------------------------------------------------------
@@ -394,7 +394,7 @@ EXPORT Medley := MODULE
                             {
                                 if (x > 0)
                                 {
-                                    // Copy over the next single char that will not change in
+                                    // Copy over the next single element that will not change in
                                     // subsequent loop iterations
                                     myAttrList[x - 1] = theAttrList[x - 1];
                                 }
