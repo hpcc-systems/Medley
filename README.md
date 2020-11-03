@@ -49,6 +49,7 @@ The following attributes are all exported:
 |:----:|:-----|
 |0.5.0|Initial public release|
 |0.6.0|Support for multiple field directives in a single build|
+|0.6.1|Rename offensive terms|
 
 ## Example Code
 

@@ -120,7 +120,7 @@ EXPORT Medley := MODULE
 
     /**
      * Embedded function for reducing linked MatchingID_t pairs.  Note that
-     * reduction occurs on only a per-slave basis; it is possible that
+     * reduction occurs on only a per-worker basis; it is possible that
      * further reductions are possible in a global process.
      *
      * The following must be true within the argument:
@@ -884,7 +884,7 @@ EXPORT Medley := MODULE
                 MERGE
             );
 
-        // Prepare this dataset for per-slave "chain walking" to minimize
+        // Prepare this dataset for per-worker "chain walking" to minimize
         // matching_id for each related_matching_id; if the dataset is small
         // enough, distribute it to a single node so the subsequent LOOP has
         // less work to do
@@ -900,8 +900,8 @@ EXPORT Medley := MODULE
         reducedUniqueMatchIDPairs := LocallyReduceMatchPairs(uniqueMatchIDPairs);
 
         // Total reduction is not possible with a large reducedUniqueMatchIDPairs
-        // because LocallyReduceMatchPairs() works only on a slave's local data
-        // and chains could span slaves; prepare the data for LOOP
+        // because LocallyReduceMatchPairs() works only on a worker's local data
+        // and chains could span workers; prepare the data for LOOP
         tempNormalizedIDMatchID := PROJECT
             (
                 normalizedIDMatchID,
