@@ -49,7 +49,7 @@ The following attributes are all exported:
 |:----:|:-----|
 |0.5.0|Initial public release|
 |0.6.0|Support for multiple field directives in a single build|
-|0.6.1|Rename offensive terms|
+|0.6.1|Rename offensive terms; replace expensive self-join with a rollup; skip non-required fields containing empty strings when computing hashes|
 
 ## Example Code
 
@@ -146,7 +146,8 @@ The simple formula is:
 
 If the requirements say that the user needs to fill out only one of ten
 fields presented, then your MaxED value is 9.  If the user needs to fill
-out any six fields, then the MaxED value is 4.
+out any six fields, then the MaxED value is 4.  When searching, set the MaxED
+value to zero to prevent over-fuzzing the search parameters.
 
 The uber-cool part of this is two-fold:
 
@@ -239,7 +240,7 @@ After six steps, you now have all the data you need for Fun Searching.
 That data is composed of four simply-formatted but probably very large
 INDEX files.
 
-Fun Search Scenario #1: Given one or more of your unique IDs, find all
+**Fun Search Scenario #1:** Given one or more of your unique IDs, find all
 the related IDs.  This is pretty straightforward:
 
 1) Stuff your IDs into a DATASET(IDLayout) and call the
@@ -248,16 +249,16 @@ pathnames for some of the index files as well.  What you get back
 is a set of records containing one of your original IDs and
 a related ID (RelatedIDLayout format).
 
-Fun Search Scenario #2:  Given a set of information that mimics the data
+**Fun Search Scenario #2:**  Given a set of information that mimics the data
 you have indexed -- basically a populated one-record dataset in the
 same format as your original data -- and find the IDs of the matching
 records.
 
 1) Create a dataset with a layout that includes at least the fields
-used when creating the deletion neighborhood indexes.  Make sure
-to include the unique ID field, even though you probably don't
-have a value for it.  You can have more than one record in this
-dataset if needed.
+used when creating the deletion neighborhood indexes and populate it
+with your search values.  Make sure to include the unique ID field, even
+though you probably don't have a value for it.  You can have more than
+one record in this dataset if needed.
 
 2) Pass this created dataset to CreateLookupTable() along with the
 field directive string you used when creating the lookup
@@ -267,6 +268,48 @@ back a lookup table of hash codes.
 3) Pass the lookup table to the FindRelatedIDsFromLookupTable()
 function.  What you get back will be a simple list of IDs
 (in IDLayout format) that are similar to the data from step #1.
+
+**Fun Search Scenario #3:** Like #2, but you are satisfying the use case
+of "find records given up anywhere from N to M number field values"
+(where M is the actual number of fields you have indexed).
+
+1) Create a dataset with a layout that includes at least the fields
+used when creating the deletion neighborhood indexes and populate it
+with your search values.  In this layout, use UTF8 as the data type
+for every field, but use the same names.  Where the user does not
+supply a value for a field, make sure that field's value is an empty
+string.  Make sure to include the unique ID field, even
+though you probably don't have a value for it.
+
+2) Pass this created dataset to CreateLookupTable() along with the
+field directive string you used when creating the lookup
+indexes, and use zero for the field group-level edit distance.  You will get
+back a lookup table of hash codes.
+
+3) JOIN those hash codes against the index defined by
+`Medley.Hash2IDLookupIndexDef(Medley.HASH2ID_LOOKUP.PATH_ROXIE)`,
+basically filtering that index by the lookup table you computed.  The JOIN
+would look something like this:
+
+        hashMatches := JOIN
+            (
+                lookupTable,
+                hash2IDIndex,
+                LEFT.hash_value = RIGHT.hash_value,
+                TRANSFORM(RIGHT),
+                LIMIT(0)
+            );
+
+The result of that JOIN will be a dataset with this layout:
+
+        LookupTableLayout := RECORD
+            ID_t                id;
+            Hash_t              hash_value;
+        END;
+
+The results will be the matches against your data, and the `id` field
+is your entity ID.  Now you can look up those IDs in your master file
+to retrieve the original data.
 
 <a name="field_directive_formatting"></a>
 ## Field Directive Formatting
@@ -319,7 +362,7 @@ If you want to consider all of these fields independently, without grouping
 or creating any string-based deletion neighborhoods, the field
 directive is a simple semi-colon delimited list of the six fields:
 
-     fname;lname;street;city;state;postal;
+     'fname;lname;street;city;state;postal;'
 
 Note that a "field group" is defined as "one or more fields" so you have a
 field directive defining six field groups, even though each field
@@ -330,7 +373,7 @@ city, state, and postal fields together:  Don't break them up, and don't
 delete one of those independently.  Those fields become a "field group"
 and are comma-delimited items:
 
-     fname;lname;street;city,state,postal;
+     'fname;lname;street;city,state,postal;'
 
 You now have four field groups:
 
@@ -345,7 +388,7 @@ creating deletion neighborhoods BLINDLY deletes items).  The way you
 designate a field group as required is to prepend the entire group (meaning,
 the first field name in the group) with an ampersand character:
 
-     fname;lname;street;&city,state,postal;
+     'fname;lname;street;&city,state,postal;'
 
 You still have four field groups, but only three of them will participate
 in the deletion neighborhood.  If your MaxED is 1, that means indexes will
@@ -369,7 +412,7 @@ want to be able to find first names with up to one character different
 (MaxED = 1) and the street part of the address with up to two characters
 different (MaxED = 2).  The directive will become:
 
-     fname%1;lname;street%2;&city,state,postal;
+     'fname%1;lname;street%2;&city,state,postal;'
 
 This would cause every record in your dataset to be duplicated with subtle
 variations in the fname and street values, exploding the size of the data
@@ -385,10 +428,12 @@ It's just that there will be many more of those records processed.
 As an example of using multiple field directives, let us take our example
 and assume that we want to match records using two different criteria:
 
-     fname;lname;postal;
-     lname;city,state,postal;
+     'fname;lname;postal;'
+     'lname;city,state,postal;'
 
 Those two criteria are considered OR'd together when it comes to matching.
 All of the other formatting directives and limitations are valid for each
 directive.  To supply them, simply submit them in a ```SET OF STRING```
-data type rather than a simple ```STRING```.
+data type rather than a simple ```STRING```:
+
+     ['fname;lname;postal;', 'lname;city,state,postal;']
