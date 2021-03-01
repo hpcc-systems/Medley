@@ -47,7 +47,7 @@ EXPORT Medley := MODULE
     //-------------------------------------------------------------------------
     EXPORT UNSIGNED1 VERSION_MAJOR := 0;
     EXPORT UNSIGNED1 VERSION_MINOR := 6;
-    EXPORT UNSIGNED1 VERSION_POINT := 0;
+    EXPORT UNSIGNED1 VERSION_POINT := 1;
     EXPORT STRING VERSION_STRING := VERSION_MAJOR + '.' + VERSION_MINOR + '.' + VERSION_POINT;
 
     //-------------------------------------------------------------------------
@@ -120,7 +120,7 @@ EXPORT Medley := MODULE
 
     /**
      * Embedded function for reducing linked MatchingID_t pairs.  Note that
-     * reduction occurs on only a per-slave basis; it is possible that
+     * reduction occurs on only a per-worker basis; it is possible that
      * further reductions are possible in a global process.
      *
      * The following must be true within the argument:
@@ -394,7 +394,7 @@ EXPORT Medley := MODULE
                             {
                                 if (x > 0)
                                 {
-                                    // Copy over the next single char that will not change in
+                                    // Copy over the next single element that will not change in
                                     // subsequent loop iterations
                                     myAttrList[x - 1] = theAttrList[x - 1];
                                 }
@@ -473,7 +473,7 @@ EXPORT Medley := MODULE
             hash64_t*   setSource = static_cast<hash64_t*>(const_cast<void*>(_attr_set));
             unsigned    numElements = len_attr_set / sizeof(hash64_t);
 
-            return new StreamedHashValueDataset(_resultAllocator, setSource, numElements, max_edit_distance);
+            return new StreamedHashValueDataset(_resultAllocator, setSource, numElements, (max_edit_distance > numElements - 1 ? numElements - 1 : max_edit_distance));
         ENDEMBED;
 
         // Housekeeping involving fieldSpec, which could be a single spec (string)
@@ -678,22 +678,12 @@ EXPORT Medley := MODULE
                     LOCAL %expandedWorkingFile% := %workingFile%;
                 #END
 
-                // Create ECL code for hashing our fields and field groups
-                #UNIQUENAME(myFieldSpecLEFT)
-                #UNIQUENAME(requiredHashCmd)
-                #IF(%requiredFieldSpecCount% > 0)
-                    #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'requiredFieldSpec'%, ''), 'LEFT.$1'))
-                    #SET(requiredHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'))
-                    #SET(requiredHashCmd, 'HASH64(' + REGEXREPLACE(';', %'requiredHashCmd'%, ',') + ')')
-                #ELSE
-                    #SET(requiredHashCmd, -1)
-                #END
-                #SET(myFieldSpecLEFT, REGEXREPLACE('([^,;]+)', REGEXREPLACE('%\\d+', %'otherFieldSpec'%, ''), 'LEFT.$1'))
-                #UNIQUENAME(otherHashCmd)
-                #SET(otherHashCmd, REGEXREPLACE('([^;]+)', %'myFieldSpecLEFT'%, 'HASH64($1)'))
-                #SET(otherHashCmd, '[' + REGEXREPLACE(';', %'otherHashCmd'%, ',') + ']')
-
                 // Collect all hashes needed for intra-field deletion neighborhood
+                #UNIQUENAME(requiredHashCmd)
+                #UNIQUENAME(groupPos)
+                #UNIQUENAME(groupFields)
+                #UNIQUENAME(bareFieldNames)
+                #UNIQUENAME(needsOuterDelim)
                 #UNIQUENAME(hashSets)
                 LOCAL %hashSets% := PROJECT
                     (
@@ -705,8 +695,98 @@ EXPORT Medley := MODULE
                                     #$.Medley.Hash_t        required_hash_value,
                                     SET OF #$.Medley.Hash_t hash_values
                                 },
+
+                                #IF(%requiredFieldSpecCount% > 0)
+                                    requiredSet := SET(DATASET
+                                        (
+                                            [
+                                                #SET(groupPos, 1)
+                                                #SET(needsOuterDelim, 0)
+                                                #SET(bareFieldNames, REGEXREPLACE('%\\d+', %'requiredFieldSpec'%, ''))
+                                                #LOOP
+                                                    #SET(groupFields, REGEXFIND('^([^;]+)', %'bareFieldNames'%[%groupPos%..], 1))
+                                                    #IF(%'groupFields'% != '')
+                                                        #IF(%needsOuterDelim% = 1) , #END
+                                                        HASH64
+                                                            (
+                                                                SET(DATASET
+                                                                    (
+                                                                        [
+                                                                            #SET(pos, 1)
+                                                                            #SET(needDelim, 0)
+                                                                            #LOOP
+                                                                                #SET(temp, REGEXFIND('^([^,]+)', %'groupFields'%[%pos%..], 1))
+                                                                                #IF(%'temp'% != '')
+                                                                                    #IF(%needDelim% = 1) , #END
+                                                                                    IF(TRIM(LEFT.%temp%) != '', %'temp'% + ':' + TRIM(LEFT.%temp%), '')
+                                                                                    #SET(needDelim, 1)
+                                                                                    #SET(pos, %pos% + LENGTH(%'temp'% + 1))
+                                                                                #ELSE
+                                                                                    #BREAK
+                                                                                #END
+                                                                            #END
+                                                                        ],
+                                                                        {UTF8 v}
+                                                                    )(v != ''), v)
+                                                            )
+                                                        #SET(groupPos, %groupPos% + LENGTH(%'groupFields'% + 1))
+                                                        #SET(needsOuterDelim, 1)
+                                                    #ELSE
+                                                        #BREAK
+                                                    #END
+                                                #END
+                                            ],
+                                            {UNSIGNED8 h}
+                                        ), h);
+                                    #SET(requiredHashCmd, 'HASH64(requiredSet)')
+                                #ELSE
+                                    #SET(requiredHashCmd, -1)
+                                #END
+
+                                otherSet := SET(DATASET
+                                    (
+                                        [
+                                            #SET(groupPos, 1)
+                                            #SET(needsOuterDelim, 0)
+                                            #SET(bareFieldNames, REGEXREPLACE('%\\d+', %'otherFieldSpec'%, ''))
+                                            #LOOP
+                                                #SET(groupFields, REGEXFIND('^([^;]+)', %'bareFieldNames'%[%groupPos%..], 1))
+                                                #IF(%'groupFields'% != '')
+                                                    #IF(%needsOuterDelim% = 1) , #END
+                                                    HASH64
+                                                        (
+                                                            SET(DATASET
+                                                                (
+                                                                    [
+                                                                        #SET(pos, 1)
+                                                                        #SET(needDelim, 0)
+                                                                        #LOOP
+                                                                            #SET(temp, REGEXFIND('^([^,]+)', %'groupFields'%[%pos%..], 1))
+                                                                            #IF(%'temp'% != '')
+                                                                                #IF(%needDelim% = 1) , #END
+                                                                                IF(TRIM(LEFT.%temp%) != U8'', (UTF8)%'temp'% + U8':' + TRIM(LEFT.%temp%), U8'')
+                                                                                #SET(needDelim, 1)
+                                                                                #SET(pos, %pos% + LENGTH(%'temp'% + 1))
+                                                                            #ELSE
+                                                                                #BREAK
+                                                                            #END
+                                                                        #END
+                                                                    ],
+                                                                    {UTF8 v}
+                                                                )(v != U8''), v)
+                                                        )
+                                                    #SET(groupPos, %groupPos% + LENGTH(%'groupFields'% + 1))
+                                                    #SET(needsOuterDelim, 1)
+                                                #ELSE
+                                                    #BREAK
+                                                #END
+                                            #END
+                                        ],
+                                        {UNSIGNED8 h}
+                                    )(h != HASH64([])), h);
+
                                 SELF.required_hash_value := %requiredHashCmd%,
-                                SELF.hash_values := %otherHashCmd%,
+                                SELF.hash_values := IF(EXISTS(otherSet), otherSet, [-1]),
                                 SELF := LEFT
                             )
                     );
@@ -792,35 +872,32 @@ EXPORT Medley := MODULE
      * @see     CreateLookupTable
      */
     EXPORT DATASET(CollapsedMatchingLayout) CollapseLookupTable(DATASET(LookupTableLayout) lookupTable) := FUNCTION
-        // Find initial ID <-> ID links via identical hash values
-        uniqueIDLinks := JOIN
+        // Prep for rollup
+        idLinksAsSet0 := PROJECT
             (
                 lookupTable,
-                lookupTable,
-                LEFT.hash_value = RIGHT.hash_value
-                    AND LEFT.id < RIGHT.id,
                 TRANSFORM
                     (
                         {
-                            ID_t            id,
+                            RECORDOF(LEFT),
                             SET OF ID_t     id_set
                         },
-                        SELF.id := LEFT.id,
-                        SELF.id_set := [RIGHT.id]
+                        SELF.id_set := [LEFT.id],
+                        SELF := LEFT
                     )
             );
 
-        // Collect all IDs that link on hash values into a SET ...
+        // Group all shared IDs under the same hash value
         idLinksAsSet := ROLLUP
             (
-                SORT(uniqueIDLinks, id),
+                SORT(idLinksAsSet0, hash_value, id),
                 TRANSFORM
                     (
                         RECORDOF(LEFT),
-                        SELF.id := LEFT.id,
-                        SELF.id_set := LEFT.id_set + RIGHT.id_set
+                        SELF.id_set := LEFT.id_set + RIGHT.id_set,
+                        SELF := LEFT
                     ),
-                id
+                hash_value
             );
 
         // ... and assign an initial matching_id to them
@@ -834,7 +911,7 @@ EXPORT Medley := MODULE
                             SET OF ID_t         id_set
                         },
                         SELF.matching_id := COUNTER,
-                        SELF.id_set := [LEFT.id] + LEFT.id_set
+                        SELF := LEFT
                     )
             );
 
@@ -884,7 +961,7 @@ EXPORT Medley := MODULE
                 MERGE
             );
 
-        // Prepare this dataset for per-slave "chain walking" to minimize
+        // Prepare this dataset for per-worker "chain walking" to minimize
         // matching_id for each related_matching_id; if the dataset is small
         // enough, distribute it to a single node so the subsequent LOOP has
         // less work to do
@@ -900,8 +977,8 @@ EXPORT Medley := MODULE
         reducedUniqueMatchIDPairs := LocallyReduceMatchPairs(uniqueMatchIDPairs);
 
         // Total reduction is not possible with a large reducedUniqueMatchIDPairs
-        // because LocallyReduceMatchPairs() works only on a slave's local data
-        // and chains could span slaves; prepare the data for LOOP
+        // because LocallyReduceMatchPairs() works only on a worker's local data
+        // and chains could span workers; prepare the data for LOOP
         tempNormalizedIDMatchID := PROJECT
             (
                 normalizedIDMatchID,
@@ -1234,7 +1311,8 @@ EXPORT Medley := MODULE
                 lookupTable,
                 hash2IDIndex,
                 LEFT.hash_value = RIGHT.hash_value,
-                TRANSFORM(RIGHT)
+                TRANSFORM(RIGHT),
+                LIMIT(0)
             );
 
         initialIDList := TABLE(hashMatches, {id}, id, MERGE);
@@ -1242,19 +1320,23 @@ EXPORT Medley := MODULE
         // Lookup match_id values for all gathered IDs
         initialMatches := JOIN
             (
-                hashMatches,
+                initialIDList,
                 id2MatchIndex,
                 LEFT.id = RIGHT.id,
-                TRANSFORM(RIGHT)
+                TRANSFORM(RIGHT),
+                LIMIT(0)
             );
+
+        initialMatchIDList := TABLE(initialMatches, {matching_id}, matching_id, MERGE);
 
         // Collect all IDs associated with collected match_id values
         relatedMatches := JOIN
             (
-                initialMatches,
+                initialMatchIDList,
                 match2IDIndex,
                 LEFT.matching_id = RIGHT.matching_id,
-                TRANSFORM(RIGHT)
+                TRANSFORM(RIGHT),
+                LIMIT(0)
             );
 
         // There are likely a lot of duplicates
