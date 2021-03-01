@@ -10,6 +10,8 @@
  *
  * LexisNexis Risk Solutions patent pending as of June 30, 2020.
  *
+ * Copyright (C) 2021 HPCC Systems
+ *
  * ----------------------------------------------------------------------------
  * EXPORTED ATTRIBUTES
  * ----------------------------------------------------------------------------
@@ -47,7 +49,7 @@ EXPORT Medley := MODULE
     //-------------------------------------------------------------------------
     EXPORT UNSIGNED1 VERSION_MAJOR := 0;
     EXPORT UNSIGNED1 VERSION_MINOR := 6;
-    EXPORT UNSIGNED1 VERSION_POINT := 1;
+    EXPORT UNSIGNED1 VERSION_POINT := 2;
     EXPORT STRING VERSION_STRING := VERSION_MAJOR + '.' + VERSION_MINOR + '.' + VERSION_POINT;
 
     //-------------------------------------------------------------------------

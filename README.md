@@ -50,6 +50,7 @@ The following attributes are all exported:
 |0.5.0|Initial public release|
 |0.6.0|Support for multiple field directives in a single build|
 |0.6.1|Rename offensive terms; replace expensive self-join with a rollup; skip non-required fields containing empty strings when computing hashes|
+|0.6.2||
 
 ## Example Code
 
