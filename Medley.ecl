@@ -138,6 +138,8 @@ EXPORT Medley := MODULE
     SHARED STREAMED DATASET(MatchIDPairsRec) LocallyReduceMatchPairs(STREAMED DATASET(MatchIDPairsRec) ds) := EMBED(C++ : activity)
         #include <map>
 
+        #body
+
         typedef uint32_t ID_ELEMENT_TYPE;
         typedef std::map<ID_ELEMENT_TYPE, ID_ELEMENT_TYPE> MatchMap;
 
@@ -196,8 +198,6 @@ EXPORT Medley := MODULE
                 MatchMap                    theMap;
         };
 
-        #body
-
         return new MatchIDPairDataset(_resultAllocator, ds);
     ENDEMBED;
 
@@ -238,6 +238,8 @@ EXPORT Medley := MODULE
             #option pure;
             #include <set>
             #include <string>
+
+            #body
 
             #define UCHAR_TYPE uint16_t
             #include <unicode/unistr.h>
@@ -336,8 +338,6 @@ EXPORT Medley := MODULE
                     bool                        isStopped;
             };
 
-            #body
-
             return new StreamedStringDataset(_resultAllocator, rtlUtf8Size(lenText, text), text, max_edit_distance);
         ENDEMBED;
 
@@ -348,6 +348,8 @@ EXPORT Medley := MODULE
             #option pure;
             #include <set>
             #include <vector>
+
+            #body
 
             typedef std::vector<hash64_t> AttrList;
             typedef std::set<hash64_t> HashSet;
@@ -469,8 +471,6 @@ EXPORT Medley := MODULE
                     bool                        isInited;
                     bool                        isStopped;
             };
-
-            #body
 
             hash64_t*   setSource = static_cast<hash64_t*>(const_cast<void*>(_attr_set));
             unsigned    numElements = len_attr_set / sizeof(hash64_t);
