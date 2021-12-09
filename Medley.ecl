@@ -49,7 +49,7 @@ EXPORT Medley := MODULE
     //-------------------------------------------------------------------------
     EXPORT UNSIGNED1 VERSION_MAJOR := 0;
     EXPORT UNSIGNED1 VERSION_MINOR := 6;
-    EXPORT UNSIGNED1 VERSION_POINT := 2;
+    EXPORT UNSIGNED1 VERSION_POINT := 3;
     EXPORT STRING VERSION_STRING := VERSION_MAJOR + '.' + VERSION_MINOR + '.' + VERSION_POINT;
 
     //-------------------------------------------------------------------------
