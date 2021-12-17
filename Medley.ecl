@@ -206,31 +206,31 @@ EXPORT Medley := MODULE
      * Both inter-field and intra-field deletion neighborhoods may be created,
      * depending on the value of the fieldSpec parameter.
      *
-     * @param   inFile              The dataset to process; REQUIRED
-     * @param   idField             The unique identifier field within each
-     *                              record; this is not a string; the field's
-     *                              data type should match the ID_t definition
-     *                              above; REQUIRED
-     * @param   fieldSpec           A description of how the dataset should be
-     *                              processed; can be a single STRING or a
-     *                              SET OF STRING to define several descriptions
-     *                              that are combined via OR; within each STRING,
-     *                              semi-colons are used to delimit field groups,
-     *                              commas are used to delimit fields; field
-     *                              names may optionally have a suffix of '%N'
-     *                              where N is the maximum edit distance to use
-     *                              when creating an inter-field deletion
-     *                              neighborhood; fields and field groups may
-     *                              have a '&' prefix to indicate that the field
-     *                              or field group should not be deleted when
-     *                              constructing the intra-field deletion
-     *                              neighhborhood; REQUIRED
-     * @param   maxEditDistance     The maximum intra-field edit distance to
-     *                              create; OPTIONAL, defaults to 1
+     * @param   inFile                      The dataset to process; REQUIRED
+     * @param   idField                     The unique identifier field within each
+     *                                      record; this is not a string; the field's
+     *                                      data type should match the ID_t definition
+     *                                      above; REQUIRED
+     * @param   fieldSpec                   A description of how the dataset should be
+     *                                      processed; can be a single STRING or a
+     *                                      SET OF STRING to define several descriptions
+     *                                      that are combined via OR; within each STRING,
+     *                                      semi-colons are used to delimit field groups,
+     *                                      commas are used to delimit fields; field
+     *                                      names may optionally have a suffix of '%N'
+     *                                      where N is the maximum edit distance to use
+     *                                      when creating an inter-field deletion
+     *                                      neighborhood; fields and field groups may
+     *                                      have a '&' prefix to indicate that the field
+     *                                      or field group should not be deleted when
+     *                                      constructing the intra-field deletion
+     *                                      neighhborhood; REQUIRED
+     * @param   maxIntraFieldEditDistance   The maximum intra-field edit distance to
+     *                                      create; OPTIONAL, defaults to 1
      *
      * @return  A new DATASET(LookupTableLayout) dataset.
      */
-    EXPORT CreateLookupTable(inFile, idField, fieldSpec, maxEditDistance = 1) := FUNCTIONMACRO
+    EXPORT CreateLookupTable(inFile, idField, fieldSpec, maxIntraFieldEditDistance = 1) := FUNCTIONMACRO
         // Embedded function for creating substrings mapping to a deletion neighborhood;
         // note that the strings themselves are returned, not a hash of the string
         #UNIQUENAME(CreateStringDeletionNeighborhood);
@@ -499,8 +499,8 @@ EXPORT Medley := MODULE
         LOCAL %distInFile% := DISTRIBUTE(inFile, HASH64((#$.Medley.ID_t)idField));
 
         // Make sure edit distance is non-negative
-        #UNIQUENAME(myMaxEditDistance);
-        #SET(myMaxEditDistance, (UNSIGNED1)MAX((INTEGER1)maxEditDistance, 0));
+        #UNIQUENAME(myMaxIntraFieldEditDistance);
+        #SET(myMaxIntraFieldEditDistance, (UNSIGNED1)MAX((INTEGER1)maxIntraFieldEditDistance, 0));
 
         // Placeholder for some built-up ECL, combining the results from
         // multiple field specs
@@ -798,7 +798,7 @@ EXPORT Medley := MODULE
                 LOCAL %collapsedHashes% := NORMALIZE
                     (
                         %hashSets%,
-                        %CreateNumericSetDeletionNeighborhood%(LEFT.hash_values, %myMaxEditDistance%),
+                        %CreateNumericSetDeletionNeighborhood%(LEFT.hash_values, %myMaxIntraFieldEditDistance%),
                         TRANSFORM
                             (
                                 {
@@ -1062,37 +1062,37 @@ EXPORT Medley := MODULE
      *      WriteIDLookupIndexes()
      *      WriteMatchIDIndexes()
      *
-     * @param   inFile              The dataset to process; REQUIRED
-     * @param   idField             The unique identifier field within each
-     *                              record; this is not a string; the field's
-     *                              data type should match the ID_t definition
-     *                              above; REQUIRED
-     * @param   fieldSpec           A string describing how the dataset should
-     *                              be processed; semi-colons are used to
-     *                              delimit field groups, commas are used to
-     *                              delimit fields; field names may optionally
-     *                              have a suffix of '%N' where N is the
-     *                              maximum edit distance to use when creating
-     *                              an inter-field deletion neighborhood;
-     *                              fields and field groups may have a
-     *                              '&' prefix to indicate that the field or
-     *                              field group should not be deleted when
-     *                              constructing the intra-field deletion
-     *                              neighhborhood; REQUIRED
-     * @param   maxEditDistance     The maximum intra-field edit distance to
-     *                              create; this is a positive integer; REQUIRED
-     * @param   id2HashIndexPath    Logical pathname of the ID->Hash
-     *                              index file; existing index will be
-     *                              overwritten if present; REQUIRED
-     * @param   hash2IDIndexPath    Logical pathname of the Hash->ID
-     *                              index file; existing index will be
-     *                              overwritten if present; REQUIRED
-     * @param   id2MatchIndexPath   Logical pathname of the ID->MatchID
-     *                              index file; existing index will be
-     *                              overwritten if present; REQUIRED
-     * @param   match2IDIndexPath   Logical pathname of the MatchID->ID
-     *                              index file; existing index will be
-     *                              overwritten if present; REQUIRED
+     * @param   inFile                      The dataset to process; REQUIRED
+     * @param   idField                     The unique identifier field within each
+     *                                      record; this is not a string; the field's
+     *                                      data type should match the ID_t definition
+     *                                      above; REQUIRED
+     * @param   fieldSpec                   A string describing how the dataset should
+     *                                      be processed; semi-colons are used to
+     *                                      delimit field groups, commas are used to
+     *                                      delimit fields; field names may optionally
+     *                                      have a suffix of '%N' where N is the
+     *                                      maximum edit distance to use when creating
+     *                                      an inter-field deletion neighborhood;
+     *                                      fields and field groups may have a
+     *                                      '&' prefix to indicate that the field or
+     *                                      field group should not be deleted when
+     *                                      constructing the intra-field deletion
+     *                                      neighhborhood; REQUIRED
+     * @param   maxIntraFieldEditDistance   The maximum intra-field edit distance to
+     *                                      create; this is a positive integer; REQUIRED
+     * @param   id2HashIndexPath            Logical pathname of the ID->Hash
+     *                                      index file; existing index will be
+     *                                      overwritten if present; REQUIRED
+     * @param   hash2IDIndexPath            Logical pathname of the Hash->ID
+     *                                      index file; existing index will be
+     *                                      overwritten if present; REQUIRED
+     * @param   id2MatchIndexPath           Logical pathname of the ID->MatchID
+     *                                      index file; existing index will be
+     *                                      overwritten if present; REQUIRED
+     * @param   match2IDIndexPath           Logical pathname of the MatchID->ID
+     *                                      index file; existing index will be
+     *                                      overwritten if present; REQUIRED
      *
      * @return  An action that creates all index files and echoes three
      *          argument values to the workunit for tracking purposes
@@ -1107,7 +1107,7 @@ EXPORT Medley := MODULE
     EXPORT BuildAllIndexes(inFile,
                            idField,
                            fieldSpec,
-                           maxEditDistance,
+                           maxIntraFieldEditDistance,
                            id2HashIndexPath,
                            hash2IDIndexPath,
                            id2MatchIndexPath,
@@ -1119,7 +1119,7 @@ EXPORT Medley := MODULE
                 inFile,
                 idField,
                 fieldSpec,
-                maxEditDistance
+                maxIntraFieldEditDistance
             );
 
         // Perform the collapse (deduplication)
@@ -1147,7 +1147,7 @@ EXPORT Medley := MODULE
             (
                 OUTPUT(COUNT(inFile), NAMED('source_data_rec_count'));
                 OUTPUT(fieldSpec, NAMED('frag_directive'));
-                OUTPUT(maxEditDistance, NAMED('frag_edit_distance'));
+                OUTPUT(maxIntraFieldEditDistance, NAMED('frag_edit_distance'));
                 %createLookupIndexesAction%;
                 %createMatchIndexesAction%;
             );

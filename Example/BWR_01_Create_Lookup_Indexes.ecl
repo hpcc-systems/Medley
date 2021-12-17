@@ -21,7 +21,7 @@ Medley.BuildAllIndexes
         $.Job.SourceData.File,
         #EXPAND($.Job.SourceData.EntityIDFieldName),
         $.Job.FRAG_DIRECTIVE,
-        maxEditDistance := $.Job.FRAG_EDIT_DISTANCE,
+        maxIntraFieldEditDistance := $.Job.FRAG_EDIT_DISTANCE,
         id2HashIndexPath := $.Job.ID2HASH_LOOKUP_PATH,
         hash2IDIndexPath := $.Job.HASH2ID_LOOKUP_PATH,
         id2MatchIndexPath := $.Job.ID2MATCH_LOOKUP_PATH,

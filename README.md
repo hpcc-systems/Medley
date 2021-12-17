@@ -51,7 +51,7 @@ The following attributes are all exported:
 |0.6.0|Support for multiple field directives in a single build|
 |0.6.1|Rename offensive terms; replace expensive self-join with a rollup; skip non-required fields containing empty strings when computing hashes|
 |0.6.2|Rearrange ECL #body declarations in embedded C++ functions|
-|0.6.3||
+|0.6.3|API change: CreateLookupTable() and BuildAllIndexes() parameter 'maxEditDistance' renamed to 'maxIntraFieldEditDistance'|
 
 ## Example Code
 
