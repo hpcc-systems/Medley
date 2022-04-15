@@ -166,7 +166,7 @@ mean?  You can compute the number of records created by a deletion
 neighborhood with the following pseudocode (note that 'fact' means
 computing the factorial of the argument):
 
-     for (r = 1; r <= MaxED; r++)
+     for (r = 0; r <= MaxED; r++)
          numRecs += (fact(n) / (fact(r) * fact(n - r)));
 
 Where n = the number of fields in your record.  n could also be the number
