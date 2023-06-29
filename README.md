@@ -19,8 +19,6 @@ The module [Medley.ecl](Medley.ecl) provides the following features:
 - Searching for related IDs, given a dataset of IDs
 - Searching for related IDs, given a dataset of data mimicking the source dataset
 
-LexisNexis Risk Solutions patent pending as of June 30, 2020.
-
 ## License
 This software is [licensed](LICENSE.txt) under the Apache v2 license.
 
@@ -30,9 +28,9 @@ Medley supports UTF-8 via the ICU (International Components for Unicode) library
 The runtime version of this library is used by the HPCC Systems platform code,
 but Medley requires the header files as well since you're compiling new code
 using Unicode support.  If you receive an error indicating that the file
-unicode/unistr.h cannot be found, then you need to install library package.
+unicode/unistr.h cannot be found, then you need to install a library package.
 For either RHEL/CentOS or Debian operating systems, that package is libicu-dev.
-At minimum, you need to install it on the that compiles your ECL code
+At minimum, you need to install it on the node that compiles your ECL code
 (the node running eclccserver).
 
 ## Versions
