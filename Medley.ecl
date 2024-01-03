@@ -10,7 +10,7 @@
  *
  * LexisNexis Risk Solutions patent pending as of June 30, 2020.
  *
- * Copyright (C) 2023 HPCC Systems
+ * Copyright (C) 2024 HPCC Systems
  *
  * ----------------------------------------------------------------------------
  * EXPORTED ATTRIBUTES
